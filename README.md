@@ -187,3 +187,7 @@ python pgstress.py all -f examples/script.sql --rows 100k -y
 
 The SQL editor is [Monaco Editor](https://github.com/microsoft/monaco-editor) 0.45.0, © Microsoft,
 MIT license (`ui/vs/LICENSE`). Only its SQL language files are bundled.
+
+## License
+
+[MIT](LICENSE)
