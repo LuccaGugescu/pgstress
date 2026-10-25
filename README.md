@@ -17,7 +17,8 @@ Needs Python 3.10+ and PostgreSQL 12+.
 
 ## Windows app
 
-**`dist\pgstress.exe`** is a single-file Windows app. It doesn't need Python, and you can copy it
+Download **`pgstress.exe`** from the [latest release](https://github.com/LuccaGugescu/pgstress/releases/latest)
+(or build it yourself, below). It is a single-file Windows app. It doesn't need Python, and you can copy it
 anywhere. Double-click it and pgstress opens in its own window, which uses Microsoft Edge WebView2
 (built into Windows 10/11). The SQL editor is bundled, so it also works offline. The connection
 string, query and options are saved in `%LOCALAPPDATA%\pgstress`.
