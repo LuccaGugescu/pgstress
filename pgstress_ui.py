@@ -188,6 +188,7 @@ def run_job(job: Job, body):
             work = [k for k in order if rows.get(ps.label_of(k), 0) > 0]
             if work:
                 job.phase = "seeding"
+                ps.apply_session(conn, qinfo)  # e.g. search_path, needed by triggers that fire while seeding
                 with conn.cursor() as cur:
                     cur.execute("SET synchronous_commit = off")
                     if body.get("truncate"):

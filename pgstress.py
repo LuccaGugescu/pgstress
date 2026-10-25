@@ -608,7 +608,7 @@ def load_routine(conn, oid):
         )
         deps = [resolve_root(conn, s, r) for s, r in cur.fetchall()]
     tables, writes, calls = static_scan(conn, body or "")
-    tables += [k for k in deps if k not in tables]
+    tables += [k for k in dict.fromkeys(deps) if k not in tables]
     kind = "procedure" if prokind == "p" else "trigger function" if is_trigger else "function"
     stripped = strip_sql(body or "")
     routine = Routine(
@@ -750,19 +750,15 @@ def analyze_script(conn, script: str, trace=True):
     cur = conn.cursor()
     try:
         cur.execute("SET LOCAL statement_timeout = '30s'")
-        for s in info.of_kind("setup"):
-            if not CHEAP_SETUP_RE.match(strip_sql(s.text, keep_dollar=False)):
+        # setup and SET statements run in script order: `SET search_path` usually comes first
+        for s in info.of_kind("setup", "session"):
+            if s.kind == "setup" and not CHEAP_SETUP_RE.match(strip_sql(s.text, keep_dollar=False)):
                 info.notes.append(f"Not run during analysis, applied before the test: {s.short}")
                 continue
             try:
                 cur.execute(s.text)
             except psycopg.Error as e:
-                raise pg_error(e, s.offset, what="setup statement failed") from e
-        for s in info.of_kind("session"):
-            try:
-                cur.execute(s.text)
-            except psycopg.Error as e:
-                raise pg_error(e, s.offset) from e
+                raise pg_error(e, s.offset, what="setup statement failed" if s.kind == "setup" else "") from e
         if info.of_kind("ignored"):
             info.notes.append("BEGIN/COMMIT/ROLLBACK statements are ignored: pgstress wraps every run itself.")
 
@@ -813,10 +809,11 @@ def apply_setup(conn, info: QueryInfo, say=print):
     conn.rollback()
     conn.autocommit = True
     try:
-        for s in info.of_kind("setup"):
+        for s in info.of_kind("setup", "session"):
             try:
                 conn.execute(s.text)
-                say(f"applied: {s.short}")
+                if s.kind == "setup":
+                    say(f"applied: {s.short}")
             except psycopg.Error as e:
                 if e.sqlstate in DUPLICATE_STATES:
                     say(f"skipped, already exists: {s.short}")
@@ -847,6 +844,8 @@ def profile_script(conn, info: QueryInfo):
                 # a per-row trigger or a loop logs the same statement many times: keep one plan, sum the time
                 grouped = {}
                 for d, p in plans:
+                    if p.startswith("Query Text: \n"):  # BEGIN ATOMIC bodies carry no query text
+                        p = "Query Text: (statement inside a SQL-standard function body)" + p[len("Query Text: "):]
                     entry = grouped.setdefault(p.split("\n", 1)[0], {"ms": 0.0, "calls": 0, "plan": p})
                     entry["ms"] += d
                     entry["calls"] += 1
@@ -857,8 +856,8 @@ def profile_script(conn, info: QueryInfo):
             cur.execute("ROLLBACK TO SAVEPOINT pgs_profile")
             for _, _, plans in json_run or []:
                 for _, plan in plans:
-                    hints += [h for h in plan_hints(plan["Plan"]) if h not in hints]
-            return sections, hints, notes
+                    hints += plan_hints(plan["Plan"])
+            return sections, merge_hints(hints), notes
 
         # no auto_explain: EXPLAIN ANALYZE the plain statements, time the rest
         if any(s.kind == "exec" for s in info.work) or info.routines:
@@ -870,7 +869,7 @@ def profile_script(conn, info: QueryInfo):
                     text = explain(conn, s.text, analyze=True, fmt="TEXT")
                     cur.execute("ROLLBACK TO SAVEPOINT pgs_stmt")
                     plan = explain(conn, s.text, analyze=True)
-                    hints += [h for h in plan_hints(plan["Plan"]) if h not in hints]
+                    hints += plan_hints(plan["Plan"])
                     ms = plan.get("Execution Time", 0.0)
                     sections.append({"statement": s.short, "ms": ms, "plans": [{"ms": ms, "calls": 1, "plan": text}]})
                 else:
@@ -882,10 +881,23 @@ def profile_script(conn, info: QueryInfo):
             except psycopg.Error as e:
                 notes.append(f"The script failed during profiling: {pg_error(e, s.offset)}")
                 break
-        return sections, hints, notes
+        return sections, merge_hints(hints), notes
     finally:
         conn.rollback()
         conn.autocommit = True
+
+
+def apply_session(conn, info: QueryInfo):
+    """Run the script's SET statements on a connection (e.g. search_path, which triggers fired
+    while seeding rely on too). They are committed so they last for the whole session."""
+    for s in info.of_kind("session"):
+        try:
+            conn.execute(s.text)
+        except psycopg.Error as e:
+            conn.rollback()
+            raise pg_error(e, s.offset) from e
+    if not conn.autocommit:
+        conn.commit()
 
 
 def run_script_once(conn, info: QueryInfo, rollback: bool):
@@ -1004,6 +1016,7 @@ def seed_order(tables) -> list:
 # --------------------------------------------------------------------------
 
 INT_LIMITS = {"int2": 32_767, "int4": 2_147_483_647, "int8": 9_223_372_036_854_775_807}
+RANDOM_NUMBER_TOP = 10_000
 ORDERABLE = set(INT_LIMITS) | {"numeric", "float4", "float8", "date", "timestamp", "timestamptz"}
 
 
@@ -1040,14 +1053,17 @@ def base_generator(col: Column, unique: bool, anchor, opts: SeedOptions):
     if b in INT_LIMITS:
         if unique:
             return f"(g + {int(anchor or 0)})", "unique sequence"
-        top = min(1_000_000, INT_LIMITS[b])
+        # kept modest: quantities and prices get multiplied and summed, and must fit typed results
+        top = min(RANDOM_NUMBER_TOP, INT_LIMITS[b])
         return f"(1 + floor(random() * {top}))", f"random 1..{fmt_int(top)}"
     if b == "numeric":
         precision, scale = numeric_bounds(col.typmod)
         if unique:
             return f"(g + {anchor or 0})", "unique sequence"
-        top = 1_000_000 if precision is None else min(1_000_000, 10 ** (precision - scale) - 1)
-        return f"round((random() * {top})::numeric, {scale})", f"random 0..{fmt_int(top)}"
+        top = RANDOM_NUMBER_TOP if precision is None else min(RANDOM_NUMBER_TOP, 10 ** (precision - scale) - 1)
+        # never exactly 0, so the common CHECK (amount > 0) holds
+        step = f"1e-{scale}" if scale else "1"
+        return f"(round((random() * {top})::numeric, {scale}) + {step})", f"random {step}..{fmt_int(top)}"
     if b in ("float4", "float8"):
         return ("(g + {})".format(anchor or 0), "unique sequence") if unique else ("(random() * 1000)", "random 0..1000")
     if b == "bool":
@@ -1421,6 +1437,14 @@ def run_stage(dsn, script, concurrency, duration, iterations, rollback, prepared
     }
 
 
+def merge_hints(hints) -> list:
+    """Collapse hints that differ only in numbers (one per call of a routine) into one line."""
+    seen = {}
+    for h in hints:
+        seen.setdefault(NUMBER_RE.sub("#", h.replace(",", "")), []).append(h)
+    return [group[0] if len(group) == 1 else f"{group[0]} (seen {len(group)} times)" for group in seen.values()]
+
+
 def plan_hints(plan) -> list:
     hints = []
     for n in iter_nodes(plan):
@@ -1431,7 +1455,8 @@ def plan_hints(plan) -> list:
         if nt == "Seq Scan" and n.get("Filter") and removed > 10_000 and removed > 10 * actual:
             hints.append(f"Seq Scan on {rel} reads and discards {fmt_int(removed)} rows for {n['Filter']} - "
                          f"an index on the filtered column(s) may help.")
-        if nt == "Seq Scan" and loops > 10:
+        # repeated scans only matter when they read a lot in total (a 20-row lookup table is fine)
+        if nt == "Seq Scan" and loops > 10 and actual + removed > 50_000:
             hints.append(f"Seq Scan on {rel} runs {fmt_int(loops)} times (inner side of a loop) - index the join key.")
         if nt == "Sort" and n.get("Sort Space Type") == "Disk":
             hints.append(f"Sort spilled {fmt_int(n.get('Sort Space Used', 0))} kB to disk - raise work_mem "
@@ -1571,6 +1596,7 @@ def cmd_seed(conn, args, qinfo, tables, order, opts):
     if not confirm("Proceed?", args):
         raise PgStressError("aborted")
 
+    apply_session(conn, qinfo)
     with conn.cursor() as cur:
         cur.execute("SET synchronous_commit = off")
         if args.truncate:
@@ -1696,6 +1722,8 @@ def main(argv=None):
         sys.exit(f"\npgstress: {e}")
     except psycopg.OperationalError as e:
         sys.exit(f"\npgstress: cannot connect: {str(e).strip()}")
+    except psycopg.Error as e:  # e.g. the script failing on the seeded data during warm-up
+        sys.exit(f"\npgstress: the script failed: {pg_error(e)}")
     except KeyboardInterrupt:
         sys.exit("\npgstress: interrupted")
 
