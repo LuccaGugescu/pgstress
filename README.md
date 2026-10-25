@@ -17,8 +17,27 @@ Needs Python 3.10+ and PostgreSQL 12+.
 
 ## Windows app
 
-Download **`pgstress.exe`** from the [latest release](https://github.com/LuccaGugescu/pgstress/releases/latest)
-(or build it yourself, below). It is a single-file Windows app. It doesn't need Python, and you can copy it
+### Installer (recommended)
+
+Download **`pgstress-setup-<version>.exe`** from the
+[latest release](https://github.com/LuccaGugescu/pgstress/releases/latest) and run it.
+
+- It installs for your user only by default, so it doesn't ask for admin rights. You can pick an
+  all-users install on the first page.
+- It adds a Start menu entry (and, if you tick the box, a desktop icon) and appears in
+  **Settings → Apps** with an uninstaller.
+- It starts faster than the portable exe because nothing has to be unpacked at launch.
+- Uninstalling also deletes the saved connection string and query in `%LOCALAPPDATA%\pgstress`.
+- For unattended installs: `pgstress-setup-0.1.0.exe /VERYSILENT /CURRENTUSER`
+
+To build the installer yourself, install [Inno Setup 6](https://jrsoftware.org/isinfo.php)
+(`winget install JRSoftware.InnoSetup`) and run **`build-installer.bat`**. The version number comes from
+the `VERSION` file.
+
+### Portable exe
+
+**`pgstress.exe`** on the same release page is a single-file Windows app (or build it with
+`build-exe.bat`). It doesn't need Python, and you can copy it
 anywhere. Double-click it and pgstress opens in its own window, which uses Microsoft Edge WebView2
 (built into Windows 10/11). The SQL editor is bundled, so it also works offline. The connection
 string, query and options are saved in `%LOCALAPPDATA%\pgstress`.

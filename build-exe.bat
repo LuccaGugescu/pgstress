@@ -7,9 +7,12 @@ where python >nul 2>nul || set "PY=py"
 
 %PY% -m pip install --upgrade "psycopg[binary]" pywebview pyinstaller || goto :fail
 
+%PY% installer\make_version_info.py >nul || goto :fail
+
 %PY% -m PyInstaller --noconfirm --clean --onefile --windowed ^
   --name pgstress ^
   --icon assets\pgstress.ico ^
+  --version-file build\version_info.txt ^
   --add-data "ui;ui" ^
   --collect-all webview ^
   pgstress_app.py || goto :fail
