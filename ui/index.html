@@ -1,0 +1,676 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pgstress</title>
+<style>
+  :root {
+    --bg: #1e1e1e; --panel: #252526; --panel-2: #2d2d30; --input: #3c3c3c; --border: #3c3c3c;
+    --text: #cccccc; --muted: #8b8b8b; --strong: #e7e7e7;
+    --accent: #0e639c; --accent-hover: #1177bb; --link: #3794ff;
+    --ok: #4ec9b0; --warn: #cca700; --err: #f14c4c;
+    --p50: #3794ff; --p95: #cca700; --p99: #f14c4c;
+    --mono: Consolas, "Cascadia Code", "Courier New", monospace;
+    --sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 13px/1.45 var(--sans);
+         display: grid; grid-template-rows: auto minmax(0, 1fr); }
+  button, input, select, textarea { font: inherit; color: inherit; }
+
+  header { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--panel-2);
+           border-bottom: 1px solid var(--border); }
+  .brand { font-weight: 600; color: var(--strong); letter-spacing: .2px; margin-right: 6px; }
+  .brand span { color: var(--link); }
+  #dsn { flex: 1; min-width: 160px; max-width: 620px; font-family: var(--mono); font-size: 12px; }
+  .pill { font-size: 12px; padding: 2px 9px; border-radius: 10px; background: var(--input); color: var(--muted);
+          white-space: nowrap; }
+  .pill.ok { color: var(--ok); } .pill.err { color: var(--err); }
+
+  input[type=text], input[type=number], textarea, select {
+    background: var(--input); border: 1px solid transparent; border-radius: 2px; padding: 5px 8px; outline: none; }
+  input:focus, textarea:focus, select:focus { border-color: var(--link); }
+  .btn { background: var(--input); border: 0; border-radius: 2px; padding: 6px 12px; cursor: pointer; white-space: nowrap; }
+  .btn:hover { background: #4a4a4a; }
+  .btn.primary { background: var(--accent); color: #fff; }
+  .btn.primary:hover { background: var(--accent-hover); }
+  .btn.danger { background: #a1260d; color: #fff; }
+  .btn:disabled { opacity: .5; cursor: default; }
+
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 400px; min-height: 0; }
+  .left { display: grid; grid-template-rows: minmax(160px, 42%) auto minmax(0, 1fr); min-height: 0;
+          border-right: 1px solid var(--border); }
+  #editor { min-height: 0; }
+  #fallback { width: 100%; height: 100%; resize: none; border: 0; font: 14px/1.5 var(--mono); padding: 10px; display: none; }
+  .toolbar { display: flex; align-items: center; gap: 8px; padding: 7px 12px; background: var(--panel);
+             border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  .toolbar .status { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .toolbar .status.err { color: var(--err); }
+  .kbd { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 3px; padding: 0 5px; }
+  .spacer { flex: 1; }
+
+  .tabs { display: flex; gap: 0; background: var(--panel); border-bottom: 1px solid var(--border); padding-left: 6px; }
+  .tab { padding: 7px 14px; cursor: pointer; color: var(--muted); border: 0; background: none;
+         border-bottom: 1px solid transparent; font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+  .tab.active { color: var(--strong); border-bottom-color: var(--link); }
+  .results { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
+  .pane { overflow: auto; padding: 14px 16px; display: none; }
+  .pane.active { display: block; }
+  .empty { color: var(--muted); padding: 30px 0; text-align: center; }
+
+  aside { overflow: auto; background: var(--panel); }
+  section.box { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  section.box h2 { font-size: 11px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase;
+                   color: var(--muted); margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+  .hint { color: var(--muted); font-size: 12px; margin: 0 0 10px; }
+
+  .trow { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 4px 8px; align-items: center;
+          padding: 8px 0; border-top: 1px solid var(--border); }
+  .trow:first-of-type { border-top: 0; }
+  .tname { color: var(--strong); font-family: var(--mono); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; }
+  .tmeta { color: var(--muted); font-size: 11.5px; grid-column: 1; }
+  .badge { font-size: 10px; padding: 0 6px; border-radius: 8px; margin-left: 6px; vertical-align: 1px;
+           background: #094771; color: #9cdcfe; font-family: var(--sans); }
+  .badge.fk { background: #3a3d41; color: var(--muted); }
+  .trow input { width: 96px; text-align: right; font-family: var(--mono); grid-row: 1 / span 2; grid-column: 2; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; grid-column: 1 / -1; }
+  .chip { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: var(--input); border: 1px solid transparent;
+          cursor: pointer; color: var(--text); }
+  .chip:hover { border-color: var(--link); }
+  .chip.on { background: var(--accent); color: #fff; }
+  .bulk { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+
+  .field { display: grid; grid-template-columns: 1fr 120px; align-items: center; gap: 8px; margin: 8px 0; }
+  .field label { color: var(--text); }
+  .field small { display: block; color: var(--muted); font-size: 11.5px; }
+  .field input, .field select { width: 120px; }
+  .check { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; cursor: pointer; }
+  .check input { margin-top: 3px; }
+  .check small { display: block; color: var(--muted); font-size: 11.5px; }
+  .check.danger span { color: #f48771; }
+  aside details summary { cursor: pointer; color: var(--muted); font-size: 11px; letter-spacing: .6px; text-transform: uppercase; font-weight: 600; }
+  aside details[open] summary { margin-bottom: 8px; }
+  textarea#overrides { width: 100%; height: 70px; font-family: var(--mono); font-size: 12px; resize: vertical; }
+
+  .progress { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 12px 14px; margin-bottom: 16px; }
+  .progress .label { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+  .progress .label b { color: var(--strong); font-weight: 600; }
+  .bar { height: 4px; background: var(--input); border-radius: 2px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--link); width: 0; transition: width .25s; }
+  .bar.indet i { width: 30%; animation: slide 1.1s infinite ease-in-out; }
+  @keyframes slide { from { margin-left: -30%; } to { margin-left: 100%; } }
+
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .kpi { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 10px 12px; }
+  .kpi .v { font-size: 22px; color: var(--strong); font-variant-numeric: tabular-nums; }
+  .kpi .k { color: var(--muted); font-size: 11.5px; }
+
+  h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); font-weight: 600; margin: 18px 0 8px; }
+  .tw { overflow-x: auto; }
+  table.grid { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  table.grid th { text-align: right; font-weight: 600; color: var(--muted); font-size: 11.5px; padding: 6px 10px;
+                  border-bottom: 1px solid var(--border); white-space: nowrap; }
+  table.grid td { text-align: right; padding: 6px 10px; border-bottom: 1px solid #2b2b2b; font-family: var(--mono); font-size: 12.5px; white-space: nowrap; }
+  table.grid th:first-child, table.grid td:first-child { text-align: left; }
+  table.grid td.l, table.grid th.l { text-align: left; white-space: normal; }
+  td.bad { color: var(--err); }
+
+  .chart { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 12px 14px 6px; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .chart svg text { fill: var(--muted); font: 11px var(--sans); }
+  .chart svg .axis { stroke: var(--border); }
+
+  pre.plan { font: 12.5px/1.5 var(--mono); color: var(--text); background: var(--panel); border: 1px solid var(--border);
+             border-radius: 4px; padding: 12px; overflow: auto; margin: 0; }
+  .hints li { margin: 6px 0; color: #e2c08d; }
+  .note { background: #2b2a1f; border-left: 3px solid var(--warn); color: #e2d7a8; padding: 8px 12px; margin-bottom: 10px; font-size: 12.5px; white-space: pre-wrap; }
+  td.mono { font-family: var(--mono); font-size: 12px; white-space: normal; word-break: break-word; }
+  .stmt { border: 1px solid var(--border); border-radius: 4px; margin-bottom: 14px; padding: 10px 12px; background: var(--panel); }
+  .stmt-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+  .stmt-head code { font: 12.5px var(--mono); color: var(--strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stmt-head span { color: var(--link); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .plan-item { margin-top: 8px; }
+  .plan-item summary { cursor: pointer; font: 12px var(--mono); color: var(--text); }
+  .plan-item summary .q { display: inline-block; max-width: calc(100% - 160px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+  .plan-item summary span:last-child { float: right; color: var(--muted); }
+  .plan-item pre { margin-top: 6px; }
+  .errbox { background: #5a1d1d; border: 1px solid #be1100; color: #f8c8c8; padding: 10px 12px; border-radius: 4px; margin-bottom: 14px; white-space: pre-wrap; font-family: var(--mono); font-size: 12px; }
+  .log { font: 12px/1.6 var(--mono); color: var(--muted); white-space: pre-wrap; }
+  .how { color: var(--muted); }
+  .how.warn { color: var(--err); }
+
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; overflow: auto; }
+    .left { grid-template-rows: 300px auto 520px; }
+    header { flex-wrap: wrap; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">pg<span>stress</span></div>
+  <input id="dsn" type="text" spellcheck="false" placeholder="postgresql://user:password@localhost:5432/database">
+  <button class="btn" id="connectBtn">Connect</button>
+  <span class="pill" id="connPill">not connected</span>
+</header>
+
+<main>
+  <div class="left">
+    <div id="editor"><textarea id="fallback" spellcheck="false"></textarea></div>
+    <div class="toolbar">
+      <button class="btn primary" id="runBtn">&#9654; Run test</button>
+      <button class="btn danger" id="cancelBtn" hidden>&#9632; Stop</button>
+      <button class="btn" id="analyzeBtn">Analyze</button>
+      <span class="kbd">Ctrl+Enter</span>
+      <span class="status" id="status"></span>
+      <span class="spacer"></span>
+    </div>
+    <div class="results">
+      <div class="tabs">
+        <button class="tab active" data-pane="results">Results</button>
+        <button class="tab" data-pane="plan">Query plan</button>
+        <button class="tab" data-pane="data">Data generation</button>
+        <button class="tab" data-pane="log">Log</button>
+      </div>
+      <div class="pane active" id="pane-results"><div class="empty">Write SQL (a query, CALL, DO block or a whole script) and press Run test.</div></div>
+      <div class="pane" id="pane-plan"><div class="empty">The EXPLAIN ANALYZE plan shows here after a run.</div></div>
+      <div class="pane" id="pane-data"><div class="empty">Connect and write a query to see how each column will be filled.</div></div>
+      <div class="pane" id="pane-log"><div class="log" id="log"></div></div>
+    </div>
+  </div>
+
+  <aside>
+    <section class="box">
+      <h2>Rows to add</h2>
+      <p class="hint">Rows are inserted into each table before the test. 0 = test on the data that's already there.</p>
+      <div class="bulk">All query tables:
+        <button class="chip" data-bulk="0">0</button><button class="chip" data-bulk="10000">10k</button>
+        <button class="chip" data-bulk="100000">100k</button><button class="chip" data-bulk="1000000">1M</button>
+        <button class="chip" data-bulk="10000000">10M</button>
+      </div>
+      <div id="tables"><div class="hint">No tables yet: connect and write a query.</div></div>
+      <label class="check danger"><input type="checkbox" id="truncate">
+        <span>Empty these tables first<small>TRUNCATE ... CASCADE. Deletes all existing rows, and rows in tables that reference them.</small></span></label>
+    </section>
+
+    <section class="box">
+      <h2>Stress test</h2>
+      <div class="hint" style="margin-bottom:6px">Concurrent clients (one stage per value)</div>
+      <div class="chips" id="levels"></div>
+      <div class="field" style="margin-top:12px">
+        <label for="mode">Each stage runs for</label>
+        <select id="mode"><option value="duration">a duration</option><option value="iterations">N executions</option></select>
+      </div>
+      <div class="field" id="durationField"><label for="duration">Seconds per stage</label><input type="number" id="duration" min="1" value="15"></div>
+      <div class="field" id="iterField" hidden><label for="iterations">Executions per stage</label><input type="text" id="iterations" value="1000"></div>
+      <label class="check"><input type="checkbox" id="prepared"><span>Prepared statements<small>Plan once per connection, like most app drivers</small></span></label>
+    </section>
+
+    <section class="box">
+      <details>
+        <summary>Advanced</summary>
+        <div class="field"><label>Query-literal match rate<small>Share of rows that get values from your WHERE</small></label><input type="number" id="matchRate" min="0" max="1" step="0.05" value="0.1"></div>
+        <div class="field"><label>NULL rate<small>Nullable columns only</small></label><input type="number" id="nullRate" min="0" max="1" step="0.05" value="0"></div>
+        <div class="field"><label>Date span (days)<small>Random dates fall in the last N days</small></label><input type="number" id="spanDays" min="1" value="365"></div>
+        <div class="field"><label>Insert batch size</label><input type="text" id="batch" value="50k"></div>
+        <div class="field"><label>Warm-up executions</label><input type="number" id="warmup" min="0" value="3"></div>
+        <label class="check"><input type="checkbox" id="commitWrites"><span>Commit write queries<small>By default UPDATE/DELETE/INSERT runs are rolled back</small></span></label>
+        <div class="hint" style="margin:10px 0 4px">Column overrides, one per line. <code>g</code> = row number</div>
+        <textarea id="overrides" spellcheck="false" placeholder="orders.status=(ARRAY['new','paid'])[1+floor(random()*2)::int]"></textarea>
+      </details>
+    </section>
+  </aside>
+</main>
+
+<!-- Monaco ships with the app in ui/vs; the CDN copy is only a fallback when that folder is missing. -->
+<script src="vs/loader.js"></script>
+<script>
+window.__localMonaco = !!window.require;
+if (!window.__localMonaco) document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"><\/script>');
+</script>
+<script>
+const MONACO_BASE = window.__localMonaco ? location.origin : "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min";
+const LEVELS = [1, 2, 4, 8, 16, 32, 64, 128];
+const SQL_KEYWORDS = ["SELECT","FROM","WHERE","JOIN","LEFT JOIN","INNER JOIN","RIGHT JOIN","FULL JOIN","CROSS JOIN","ON","GROUP BY",
+  "ORDER BY","HAVING","LIMIT","OFFSET","DISTINCT","AS","AND","OR","NOT","IN","EXISTS","BETWEEN","LIKE","ILIKE","IS NULL",
+  "IS NOT NULL","CASE","WHEN","THEN","ELSE","END","WITH","UNION ALL","INSERT INTO","VALUES","UPDATE","SET","DELETE FROM",
+  "RETURNING","count","sum","avg","min","max","coalesce","now()","interval","DESC","ASC","LATERAL","FILTER","OVER","PARTITION BY"];
+
+const $ = id => document.getElementById(id);
+const state = {
+  editor: null, monaco: null, schema: null, analysis: null, analyzedKey: null,
+  rows: {}, levels: new Set([1, 4, 16]), job: null, poll: null, analyzeTimer: null,
+};
+
+/* ---------- helpers ---------- */
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("pgstress." + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("pgstress." + k, JSON.stringify(v)); } catch {} },
+};
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = n => Number(n || 0).toLocaleString("en-US", { maximumFractionDigits: 0 });
+const ms = v => v >= 1000 ? (v / 1000).toFixed(2) + " s" : v >= 100 ? v.toFixed(0) + " ms" : v.toFixed(2) + " ms";
+function parseCount(text) {
+  const t = String(text).trim().toLowerCase().replace(/[,_\s]/g, "");
+  if (!t) return 0;
+  const mult = { k: 1e3, m: 1e6, b: 1e9 }[t.slice(-1)] || 1;
+  const n = parseFloat(mult === 1 ? t : t.slice(0, -1));
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * mult) : NaN;
+}
+const short = n => n >= 1e6 && n % 1e5 === 0 ? n / 1e6 + "M" : n >= 1e3 && n % 100 === 0 ? n / 1e3 + "k" : String(n);
+const getQuery = () => state.editor ? state.editor.getValue() : $("fallback").value;
+const dsn = () => $("dsn").value.trim();
+
+async function api(path, body) {
+  const res = await fetch(path, { method: body ? "POST" : "GET", headers: { "Content-Type": "application/json" },
+                                  body: body ? JSON.stringify(body) : undefined });
+  const data = await res.json().catch(() => ({ error: "bad response from server" }));
+  if (!res.ok) { const e = new Error(data.error || res.statusText); e.position = data.position; throw e; }
+  return data;
+}
+function setStatus(text, isErr = false) { const s = $("status"); s.textContent = text; s.classList.toggle("err", isErr); s.title = text; }
+function showTab(name) {
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.pane === name));
+  document.querySelectorAll(".pane").forEach(p => p.classList.toggle("active", p.id === "pane-" + name));
+}
+
+function settings() {
+  return {
+    dsn: dsn(), query: getQuery(),
+    match_rate: +$("matchRate").value || 0, null_rate: +$("nullRate").value || 0,
+    span_days: +$("spanDays").value || 365, batch: parseCount($("batch").value) || 50000,
+    overrides: $("overrides").value, warmup: +$("warmup").value || 0,
+  };
+}
+const analysisKey = () => { const s = settings(); return JSON.stringify([s.dsn, s.query, s.match_rate, s.null_rate, s.span_days, s.overrides]); };
+
+/* ---------- editor ---------- */
+function setupEditor() {
+  const initial = store.get("query", "SELECT *\nFROM orders o\nJOIN users u ON u.id = o.user_id\nWHERE o.status = 'paid'\nORDER BY o.created_at DESC\nLIMIT 100;");
+  if (!window.require) return useFallback(initial);
+  window.MonacoEnvironment = { getWorkerUrl: () => "data:text/javascript;charset=utf-8," + encodeURIComponent(
+    `self.MonacoEnvironment={baseUrl:'${MONACO_BASE}/'};importScripts('${MONACO_BASE}/vs/base/worker/workerMain.js');`) };
+  require.config({ paths: { vs: MONACO_BASE + "/vs" } });
+  require(["vs/editor/editor.main"], () => {
+    const monaco = window.monaco;
+    state.monaco = monaco;
+    $("fallback").remove();
+    state.editor = monaco.editor.create($("editor"), {
+      value: initial, language: "sql", theme: "vs-dark", automaticLayout: true, fontSize: 14,
+      fontFamily: "Consolas, 'Cascadia Code', 'Courier New', monospace", minimap: { enabled: false },
+      scrollBeyondLastLine: false, renderLineHighlight: "all", tabSize: 2, padding: { top: 10 },
+      suggest: { showWords: false },
+    });
+    state.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, runTest);
+    state.editor.onDidChangeModelContent(onQueryChanged);
+    monaco.languages.registerCompletionItemProvider("sql", { triggerCharacters: ["."], provideCompletionItems: complete });
+    onQueryChanged();
+  }, () => useFallback(initial));
+}
+function useFallback(initial) {
+  const ta = $("fallback");
+  ta.style.display = "block"; ta.value = initial;
+  ta.addEventListener("input", onQueryChanged);
+  ta.addEventListener("keydown", e => { if (e.ctrlKey && e.key === "Enter") { e.preventDefault(); runTest(); } });
+  setStatus("Editor could not load from the CDN (offline?), using a plain text box.");
+}
+
+function aliasMap(sql) {
+  const map = {};
+  const re = /\b(?:from|join|update|into)\s+((?:"[^"]+"|\w+)(?:\.(?:"[^"]+"|\w+))?)(?:\s+(?:as\s+)?(?!on\b|where\b|join\b|left\b|right\b|inner\b|full\b|cross\b|group\b|order\b|limit\b|set\b)(\w+))?/gi;
+  for (const m of sql.matchAll(re)) {
+    const table = m[1].replace(/"/g, "").replace(/^public\./, "");
+    map[table.split(".").pop()] = table;
+    if (m[2]) map[m[2]] = table;
+  }
+  return map;
+}
+function complete(model, position) {
+  const monaco = state.monaco;
+  const word = model.getWordUntilPosition(position);
+  const range = { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber, startColumn: word.startColumn, endColumn: word.endColumn };
+  const before = model.getValueInRange({ startLineNumber: position.lineNumber, startColumn: 1, endLineNumber: position.lineNumber, endColumn: word.startColumn });
+  const tables = state.schema?.tables || {};
+  const dotted = before.match(/("?[\w]+"?)\.$/);
+  if (dotted) {
+    const table = aliasMap(model.getValue())[dotted[1].replace(/"/g, "")] || dotted[1];
+    return { suggestions: (tables[table] || []).map(c => ({ label: c.name, kind: monaco.languages.CompletionItemKind.Field,
+                                                           detail: c.type, insertText: c.name, range })) };
+  }
+  const suggestions = [];
+  for (const [t, cols] of Object.entries(tables)) {
+    suggestions.push({ label: t, kind: monaco.languages.CompletionItemKind.Class, detail: `table · ${cols.length} columns`, insertText: t, range });
+  }
+  const seen = new Set();
+  for (const [t, cols] of Object.entries(tables)) for (const c of cols) {
+    if (seen.has(c.name)) continue; seen.add(c.name);
+    suggestions.push({ label: c.name, kind: monaco.languages.CompletionItemKind.Field, detail: `${t}.${c.name} ${c.type}`, insertText: c.name, range, sortText: "z" + c.name });
+  }
+  for (const r of state.schema?.routines || []) {
+    suggestions.push({ label: r.name, kind: monaco.languages.CompletionItemKind.Function, detail: `${r.kind}(${r.args})`,
+                       insertText: r.name + "(", range, sortText: "y" + r.name });
+  }
+  for (const k of SQL_KEYWORDS) suggestions.push({ label: k, kind: monaco.languages.CompletionItemKind.Keyword, insertText: k, range, sortText: "zz" + k });
+  return { suggestions };
+}
+function setMarker(message, position) {
+  if (!state.editor) return;
+  const model = state.editor.getModel();
+  const markers = [];
+  if (message && position != null) {
+    // underline the whole token Postgres points at, e.g. `o.statuss`, not just `o`
+    const token = (model.getValue().slice(position).match(/^[\w."$]+/) || [""])[0];
+    const p = model.getPositionAt(position), end = model.getPositionAt(position + Math.max(1, token.length));
+    markers.push({ severity: state.monaco.MarkerSeverity.Error, message,
+                   startLineNumber: p.lineNumber, startColumn: p.column, endLineNumber: end.lineNumber, endColumn: end.column });
+  }
+  state.monaco.editor.setModelMarkers(model, "postgres", markers);
+}
+
+function onQueryChanged() {
+  store.set("query", getQuery());
+  clearTimeout(state.analyzeTimer);
+  if (state.schema) state.analyzeTimer = setTimeout(() => analyze().catch(() => {}), 700);
+}
+
+/* ---------- connection & analysis ---------- */
+async function connectDb() {
+  store.set("dsn", dsn());
+  const pill = $("connPill");
+  pill.className = "pill"; pill.textContent = "connecting...";
+  try {
+    state.schema = await api("/api/schema", { dsn: dsn() });
+    pill.className = "pill ok";
+    pill.textContent = `${state.schema.database} · PG ${state.schema.version} · ${Object.keys(state.schema.tables).length} tables`;
+    analyze().catch(() => {});
+  } catch (e) {
+    state.schema = null;
+    pill.className = "pill err"; pill.textContent = "connection failed";
+    setStatus(e.message, true);
+  }
+}
+
+// trace=true executes the script once in a rolled-back transaction so plans inside functions,
+// procedures and triggers are seen; the as-you-type analysis skips that.
+async function analyze(trace = false) {
+  const key = analysisKey();
+  if (!getQuery().trim()) return null;
+  setStatus(trace ? "Analyzing (tracing routines)..." : "Analyzing...");
+  try {
+    const a = await api("/api/analyze", { ...settings(), trace });
+    if (key !== analysisKey()) return null;  // query changed while we waited
+    state.analysis = a; state.analyzedKey = key;
+    setMarker(null);
+    renderTables(); renderDataPlan();
+    const q = a.tables.filter(t => t.role === "query").length;
+    const work = a.statements.filter(s => s.kind === "query" || s.kind === "exec").length;
+    const bits = [`${work} statement${work === 1 ? "" : "s"}`, `${q} table${q === 1 ? "" : "s"}`];
+    if (a.routines.length) bits.push(`${a.routines.length} routine${a.routines.length === 1 ? "" : "s"}`);
+    if (a.mode_note) bits.push(a.mode_note);
+    if (a.notes.length) bits.push(`${a.notes.length} note${a.notes.length === 1 ? "" : "s"} in Data generation`);
+    setStatus(bits.join(" · "));
+    return a;
+  } catch (e) {
+    if (key === analysisKey()) { setStatus(e.message.split("\n")[0], true); setMarker(e.message, e.position); }
+    throw e;
+  }
+}
+
+/* ---------- side panel ---------- */
+function defaultRows(t) { return t.rows > 0 ? 0 : t.role === "query" ? 10000 : 1000; }
+function renderTables() {
+  const box = $("tables");
+  const a = state.analysis;
+  if (!a || !a.tables.length) { box.innerHTML = '<div class="hint">The script touches no tables.</div>'; return; }
+  box.innerHTML = a.tables.map(t => {
+    if (!(t.label in state.rows)) state.rows[t.label] = defaultRows(t);
+    const n = state.rows[t.label];
+    const chips = [0, 1e4, 1e5, 1e6, 1e7].map(v => `<button class="chip${v === n ? " on" : ""}" data-table="${esc(t.label)}" data-v="${v}">${v ? short(v) : "0"}</button>`).join("");
+    return `<div class="trow">
+      <div class="tname" title="${esc(t.label)}">${esc(t.label)}<span class="badge ${t.role === "fk" ? "fk" : ""}">${t.role === "fk" ? "FK parent" : "query"}</span></div>
+      <input type="text" data-table="${esc(t.label)}" value="${fmt(n)}" aria-label="rows to add to ${esc(t.label)}">
+      <div class="tmeta">has ${fmt(t.rows)} rows${t.written ? " · written" : ""}${t.refs.length ? " · uses " + esc(t.refs.slice(0, 4).join(", ")) + (t.refs.length > 4 ? "..." : "") : ""}</div>
+      <div class="chips">${chips}</div></div>`;
+  }).join("");
+}
+$("tables").addEventListener("click", e => {
+  const c = e.target.closest(".chip[data-table]");
+  if (!c) return;
+  state.rows[c.dataset.table] = +c.dataset.v;
+  renderTables();
+});
+$("tables").addEventListener("change", e => {
+  const inp = e.target.closest("input[data-table]");
+  if (!inp) return;
+  const n = parseCount(inp.value);
+  if (Number.isNaN(n)) { inp.value = fmt(state.rows[inp.dataset.table]); return; }
+  state.rows[inp.dataset.table] = n;
+  renderTables();
+});
+document.querySelector(".bulk").addEventListener("click", e => {
+  const c = e.target.closest("[data-bulk]");
+  if (!c || !state.analysis) return;
+  for (const t of state.analysis.tables) if (t.role === "query") state.rows[t.label] = +c.dataset.bulk;
+  renderTables();
+});
+
+function renderLevels() {
+  $("levels").innerHTML = LEVELS.map(l => `<button class="chip${state.levels.has(l) ? " on" : ""}" data-level="${l}">${l}</button>`).join("");
+}
+$("levels").addEventListener("click", e => {
+  const c = e.target.closest("[data-level]");
+  if (!c) return;
+  const l = +c.dataset.level;
+  state.levels.has(l) ? state.levels.delete(l) : state.levels.add(l);
+  if (!state.levels.size) state.levels.add(l);
+  store.set("levels", [...state.levels]);
+  renderLevels();
+});
+$("mode").addEventListener("change", () => {
+  const it = $("mode").value === "iterations";
+  $("iterField").hidden = !it; $("durationField").hidden = it;
+});
+
+const KIND_LABEL = { query: "query", exec: "run", session: "per connection", setup: "setup, once", ignored: "ignored" };
+function renderDataPlan() {
+  const a = state.analysis;
+  let html = "";
+  if (a.notes.length) html += a.notes.map(n => `<div class="note">${esc(n)}</div>`).join("");
+  html += `<h3 style="margin-top:0">Statements${a.traced ? ' <span class="badge">traced</span>' : ""}</h3>
+    <div class="tw"><table class="grid"><tr><th>role</th><th class="l">statement</th></tr>${a.statements.map(s =>
+    `<tr><td><span class="badge ${s.kind === "query" || s.kind === "exec" ? "" : "fk"}">${KIND_LABEL[s.kind]}</span></td><td class="l mono">${esc(s.text)}</td></tr>`).join("")}</table></div>`;
+  if (a.routines.length) {
+    html += `<h3>Functions, procedures and triggers reached</h3><div class="tw"><table class="grid"><tr><th>routine</th><th class="l">kind</th><th class="l">tables (* = written)</th></tr>${a.routines.map(r =>
+      `<tr><td>${esc(r.name)}</td><td class="l how">${esc(r.kind)} · ${esc(r.language)}${r.txn_control ? " · commits" : ""}${r.dynamic_sql ? " · dynamic SQL" : ""}</td>
+       <td class="l">${esc(r.tables.map(t => t + (r.writes.includes(t) ? "*" : "")).join(", ") || "-")}</td></tr>`).join("")}</table></div>`;
+  }
+  if (a.literals.length) {
+    html += `<h3>Literals from your WHERE</h3><p class="hint">These values go into ${Math.round(+$("matchRate").value * 100)}% of new rows so the query has matches.</p>
+      <div class="tw"><table class="grid"><tr><th>column</th><th class="l">values</th></tr>${a.literals.map(l =>
+      `<tr><td>${esc(l.table)}.${esc(l.column)}</td><td class="l">${esc(l.values.join(", "))}</td></tr>`).join("")}</table></div>`;
+  }
+  for (const t of a.tables) {
+    html += `<h3>${esc(t.label)} <span class="badge ${t.role === "fk" ? "fk" : ""}">${t.role === "fk" ? "FK parent" : "query"}</span></h3>
+      <div class="tw"><table class="grid"><tr><th>column</th><th class="l">type</th><th class="l">how values are generated</th></tr>${t.columns.map(c =>
+      `<tr><td>${esc(c.name)}</td><td class="l how">${esc(c.type)}</td><td class="l how${c.how.startsWith("!!") ? " warn" : ""}">${esc(c.how.replace(/^!! /, ""))}</td></tr>`).join("")}</table></div>`;
+  }
+  if (a.conditions.length) {
+    html += `<h3>Conditions in the plan</h3><pre class="plan">${esc(a.conditions.map(c => `${c.kind}: ${c.text}`).join("\n"))}</pre>`;
+  }
+  $("pane-data").innerHTML = html;
+}
+
+/* ---------- run ---------- */
+async function runTest() {
+  if (state.job) return;
+  if (!dsn()) { setStatus("Enter a connection string first.", true); $("dsn").focus(); return; }
+  if (!state.schema) await connectDb();
+  if (!state.schema) return;
+  try {
+    if (state.analyzedKey !== analysisKey()) await analyze();
+  } catch { return; }
+  const a = state.analysis;
+  if (!a) return;
+  const rows = {};
+  for (const t of a.tables) rows[t.label] = state.rows[t.label] || 0;
+  const total = Object.values(rows).reduce((x, y) => x + y, 0);
+  if ($("truncate").checked && total > 0) {
+    const names = a.tables.filter(t => rows[t.label] > 0).map(t => t.label).join(", ");
+    if (!confirm(`This will DELETE ALL ROWS in: ${names}\n(and in every table that references them, via CASCADE).\n\nThis cannot be undone. Continue?`)) return;
+  }
+  const setup = a.statements.filter(s => s.kind === "setup");
+  if (setup.length && !confirm(`The script has ${setup.length} setup statement(s). They will be applied to the database ` +
+      `once (committed) before the test:\n\n${setup.map(s => "  " + s.text).join("\n")}\n\nContinue?`)) return;
+  const body = { ...settings(), rows, truncate: $("truncate").checked && total > 0, apply_setup: setup.length > 0,
+    concurrency: [...state.levels].sort((x, y) => x - y), prepared: $("prepared").checked,
+    commit_writes: $("commitWrites").checked,
+    duration: $("mode").value === "duration" ? (+$("duration").value || 15) : 0,
+    iterations: $("mode").value === "iterations" ? parseCount($("iterations").value) || 1000 : null };
+  try {
+    const { id } = await api("/api/run", body);
+    state.job = id;
+    $("runBtn").hidden = true; $("cancelBtn").hidden = false; $("analyzeBtn").disabled = true;
+    showTab("results");
+    setStatus("Running...");
+    pollJob();
+  } catch (e) { setStatus(e.message, true); }
+}
+
+async function pollJob() {
+  try {
+    const j = await api(`/api/job/${state.job}`);
+    renderJob(j);
+    if (j.state === "running") { state.poll = setTimeout(pollJob, 350); return; }
+    finishJob(j);
+  } catch (e) { setStatus(e.message, true); state.poll = setTimeout(pollJob, 1000); }
+}
+function finishJob(j) {
+  state.job = null;
+  $("runBtn").hidden = false; $("cancelBtn").hidden = true; $("analyzeBtn").disabled = false;
+  if (j.state === "error") setStatus(j.error.split("\n")[0], true);
+  else setStatus(j.state === "done" ? `Finished in ${j.elapsed.toFixed(1)} s` : "Stopped");
+  // row counts changed: refresh the panel
+  if (j.seeded.length) { for (const s of j.seeded) state.rows[s.table] = 0; state.analyzedKey = null; analyze().catch(() => {}); }
+}
+
+function progressHtml(j) {
+  if (j.state !== "running") return "";
+  const p = j.progress || {};
+  let title = "Starting...", detail = "", pct = null;
+  if (j.phase === "seeding" && p.total) {
+    title = `Inserting rows into ${esc(p.table)}`;
+    detail = `${fmt(p.done)} / ${fmt(p.total)} · ${fmt(p.rate)} rows/s · table ${p.step} of ${p.steps}`;
+    pct = p.done / p.total * 100;
+  } else if (j.phase === "seeding") title = "Preparing tables...";
+  else if (j.phase === "explain") title = "Capturing plans (including inside routines) and warming up";
+  else if (j.phase === "analyzing") title = "Analyzing the script";
+  else if (j.phase === "setup") title = "Applying setup statements";
+  else if (j.phase === "stress" && p.concurrency) {
+    title = `Stress stage ${p.stage} of ${p.stages}: ${p.concurrency} client${p.concurrency > 1 ? "s" : ""}`;
+    if (p.iterations) { detail = `${fmt(p.executions)} / ${fmt(p.iterations)} executions`; pct = p.executions / p.iterations * 100; }
+    else { detail = `${Math.min(p.elapsed, p.duration).toFixed(1)} / ${p.duration} s · ${fmt(p.executions)} executions`; pct = p.elapsed / p.duration * 100; }
+  } else if (j.phase === "stress") title = "Opening connections...";
+  return `<div class="progress"><div class="label"><b>${title}</b><span>${detail}</span></div>
+    <div class="bar${pct == null ? " indet" : ""}"><i style="width:${pct == null ? 30 : Math.min(100, pct)}%"></i></div></div>`;
+}
+
+function chartSvg(stages) {
+  const W = 640, H = 220, L = 52, B = 34, T = 10, R = 8;
+  const max = Math.max(...stages.map(s => s.p99_ms), 0.001);
+  const nice = (() => { const p = Math.pow(10, Math.floor(Math.log10(max))); return [1, 2, 2.5, 5, 10].map(m => m * p).find(v => v >= max); })();
+  const y = v => T + (H - T - B) * (1 - v / nice);
+  const gw = (W - L - R) / stages.length, bw = Math.min(26, gw / 4.2);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="latency by concurrency">`;
+  for (let i = 0; i <= 4; i++) {
+    const v = nice * i / 4;
+    svg += `<line class="axis" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke-dasharray="${i ? "2 4" : ""}"/>
+            <text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${ms(v)}</text>`;
+  }
+  stages.forEach((s, i) => {
+    const cx = L + gw * i + gw / 2;
+    [["p50_ms", "--p50"], ["p95_ms", "--p95"], ["p99_ms", "--p99"]].forEach(([k, c], j) => {
+      const x = cx + (j - 1.5) * (bw + 3), h = Math.max(1, y(0) - y(s[k]));
+      svg += `<rect x="${x}" y="${y(0) - h}" width="${bw}" height="${h}" rx="2" fill="var(${c})"><title>${s.concurrency} clients · ${k.slice(0, 3)} ${ms(s[k])}</title></rect>`;
+    });
+    svg += `<text x="${cx}" y="${H - B + 15}" text-anchor="middle">${s.concurrency} client${s.concurrency > 1 ? "s" : ""}</text>
+            <text x="${cx}" y="${H - B + 28}" text-anchor="middle">${s.qps.toFixed(1)} q/s</text>`;
+  });
+  return svg + "</svg>";
+}
+
+function renderProfile(j) {
+  let html = j.hints.length ? `<ul class="hints" style="margin-top:0">${j.hints.map(h => `<li>${esc(h)}</li>`).join("")}</ul>` : "";
+  html += j.notes.map(n => `<div class="note">${esc(n)}</div>`).join("");
+  for (const sec of j.profile) {
+    html += `<div class="stmt"><div class="stmt-head"><code>${esc(sec.statement)}</code><span>${ms(sec.ms)}</span></div>`;
+    if (!sec.plans.length) html += `<div class="hint" style="margin:8px 0 0">No plan captured for this statement.</div>`;
+    for (const p of sec.plans) {
+      html += `<details class="plan-item"${sec.plans.length <= 3 ? " open" : ""}><summary><span class="q">${esc(p.plan.split("\n")[0].replace(/^Query Text: /, ""))}</span>
+        <span>${p.calls > 1 ? `${p.calls} calls · ` : ""}${ms(p.ms)}</span></summary><pre class="plan">${esc(p.plan)}</pre></details>`;
+    }
+    html += `</div>`;
+  }
+  return html || '<div class="empty">No plans were captured.</div>';
+}
+
+function renderJob(j) {
+  let html = j.error ? `<div class="errbox">${esc(j.error)}</div>` : "";
+  if (j.state !== "running" && j.notes.length) html += j.notes.map(n => `<div class="note">${esc(n)}</div>`).join("");
+  html += progressHtml(j);
+  const st = j.stages;
+  if (st.length) {
+    const best = st.reduce((a, b) => b.qps > a.qps ? b : a);
+    const single = st[0];
+    const errs = st.reduce((n, s) => n + s.errors, 0);
+    html += `<div class="kpis">
+      <div class="kpi"><div class="v">${ms(single.p50_ms)}</div><div class="k">median latency @ ${single.concurrency} client${single.concurrency > 1 ? "s" : ""}</div></div>
+      <div class="kpi"><div class="v">${best.qps.toFixed(1)}</div><div class="k">peak queries/s (${best.concurrency} clients)</div></div>
+      <div class="kpi"><div class="v">${ms(st[st.length - 1].p99_ms)}</div><div class="k">p99 @ ${st[st.length - 1].concurrency} clients</div></div>
+      <div class="kpi"><div class="v" style="${errs ? "color:var(--err)" : ""}">${fmt(errs)}</div><div class="k">errors</div></div></div>`;
+    html += `<div class="chart"><div class="legend"><span><i style="background:var(--p50)"></i>p50</span><span><i style="background:var(--p95)"></i>p95</span><span><i style="background:var(--p99)"></i>p99</span></div>${chartSvg(st)}</div>`;
+    html += `<h3>Stages</h3><div class="tw"><table class="grid"><tr><th>clients</th><th>executions</th><th>errors</th><th>q/s</th><th>avg</th><th>p50</th><th>p95</th><th>p99</th><th>max</th><th>rows/exec</th></tr>
+      ${st.map(s => `<tr><td>${s.concurrency}</td><td>${fmt(s.executions)}</td><td class="${s.errors ? "bad" : ""}">${fmt(s.errors)}</td><td>${s.qps.toFixed(1)}</td>
+      <td>${ms(s.avg_ms)}</td><td>${ms(s.p50_ms)}</td><td>${ms(s.p95_ms)}</td><td>${ms(s.p99_ms)}</td><td>${ms(s.max_ms)}</td><td>${fmt(s.rows_per_exec)}</td></tr>`).join("")}</table></div>`;
+    const firstErr = st.find(s => s.first_error);
+    if (firstErr) html += `<div class="errbox" style="margin-top:10px">First error: ${esc(firstErr.first_error)}</div>`;
+  }
+  if (j.hints.length) html += `<h3>Hints</h3><ul class="hints">${j.hints.map(h => `<li>${esc(h)}</li>`).join("")}</ul>`;
+  if (j.seeded.length) {
+    html += `<h3>Rows inserted</h3><div class="tw"><table class="grid"><tr><th>table</th><th>requested</th><th>inserted</th><th>time</th><th>rows/s</th><th>table now has</th></tr>
+      ${j.seeded.map(s => `<tr><td>${esc(s.table)}</td><td>${fmt(s.requested)}</td><td>${fmt(s.inserted)}</td><td>${s.seconds.toFixed(1)} s</td><td>${fmt(s.inserted / Math.max(s.seconds, 0.001))}</td><td>${fmt(s.total_rows)}</td></tr>`).join("")}</table></div>`;
+  }
+  $("pane-results").innerHTML = html || '<div class="empty">Starting...</div>';
+  if (j.profile.length || (j.state !== "running" && j.notes.length)) $("pane-plan").innerHTML = renderProfile(j);
+  $("log").textContent = j.log.join("\n");
+}
+
+/* ---------- wiring ---------- */
+$("runBtn").addEventListener("click", runTest);
+$("cancelBtn").addEventListener("click", () => { if (state.job) api("/api/cancel", { id: state.job }).catch(() => {}); setStatus("Stopping after the current step..."); });
+$("analyzeBtn").addEventListener("click", async () => {
+  if (!state.schema) await connectDb();
+  if (state.schema) { analyze(true).then(() => showTab("data")).catch(() => {}); }
+});
+$("connectBtn").addEventListener("click", connectDb);
+$("dsn").addEventListener("keydown", e => { if (e.key === "Enter") connectDb(); });
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => showTab(t.dataset.pane)));
+["matchRate", "nullRate", "spanDays", "overrides"].forEach(id => $(id).addEventListener("change", () => state.schema && analyze().catch(() => {})));
+document.querySelectorAll("aside input, aside select, aside textarea").forEach(el => {
+  if (!el.id || el.id === "truncate") return;
+  const saved = store.get("opt." + el.id, null);
+  if (saved !== null) el.type === "checkbox" ? (el.checked = saved) : (el.value = saved);
+  el.addEventListener("change", () => store.set("opt." + el.id, el.type === "checkbox" ? el.checked : el.value));
+});
+$("mode").dispatchEvent(new Event("change"));
+state.levels = new Set(store.get("levels", [1, 4, 16]));
+renderLevels();
+$("dsn").value = store.get("dsn", "");
+setupEditor();
+if (dsn()) connectDb();
+</script>
+</body>
+</html>
