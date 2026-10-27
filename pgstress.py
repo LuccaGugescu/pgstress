@@ -1407,7 +1407,7 @@ def run_stage(dsn, script, concurrency, duration, iterations, rollback, prepared
                     on_progress(time.perf_counter() - started, done_count[0])
                 elif not iterations:
                     left = max(0, duration - (time.perf_counter() - started))
-                    print(f"\r    c={concurrency:<4} running... {left:5.1f}s left, {fmt_int(len(latencies))} done", end="", flush=True)
+                    print(f"\r    c={concurrency:<4} running... {left:5.1f}s left, {fmt_int(done_count[0])} done", end="", flush=True)
     except KeyboardInterrupt:
         stop.set()
         for t in threads:
