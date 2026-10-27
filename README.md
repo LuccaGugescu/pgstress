@@ -28,7 +28,7 @@ Download **`pgstress-setup-<version>.exe`** from the
   **Settings → Apps** with an uninstaller.
 - It starts faster than the portable exe because nothing has to be unpacked at launch.
 - Uninstalling also deletes the saved connection string and query in `%LOCALAPPDATA%\pgstress`.
-- For unattended installs: `pgstress-setup-0.1.1.exe /VERYSILENT /CURRENTUSER`
+- For unattended installs: `pgstress-setup-0.1.2.exe /VERYSILENT /CURRENTUSER`
 
 To build the installer yourself, install [Inno Setup 6](https://jrsoftware.org/isinfo.php)
 (`winget install JRSoftware.InnoSetup`) and run **`build-installer.bat`**. The version number comes from
